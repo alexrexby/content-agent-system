@@ -34,7 +34,7 @@ async def build_dynamic_carousel(topic: str) -> tuple[bool, str, list[Path], str
     from tg_bot.engine.agent_runner import run_agent_task
 
     prompt = (
-        f"Создай полноценную новую карусель (4-7 слайдов) для блога Амалии Саргсян на тему:\n«{topic}»\n\n"
+        f"Создай полноценную новую карусель (4-7 слайдов) для блога эксперта на тему:\n«{topic}»\n\n"
         "ОБЯЗАТЕЛЬНО верни результат в виде валидного JSON-массива карточек (с типами: cover, break, list, cta)."
     )
 
@@ -43,18 +43,18 @@ async def build_dynamic_carousel(topic: str) -> tuple[bool, str, list[Path], str
 
 async def remake_competitor_carousel(source_text: str = "", image_bytes: bytes = None) -> tuple[bool, str, list[Path], str, str, str]:
     """
-    Adapts competitor carousel/post into Amalia's Tone of Voice and compiles to PNG slides.
+    Adapts competitor carousel/post into Expert Tone of Voice and compiles to PNG slides.
     Returns (success, log, images, deck_name, model_name, explanation_text).
     """
     from tg_bot.engine.agent_runner import run_agent_task
 
     prompt = (
-        "Ты — Копирайтер и Дизайнер проекта Амалии Саргсян.\n"
+        "Ты — Копирайтер и Дизайнер проекта эксперта.\n"
         "Перед тобой карусель или пост другого автора/конкурента.\n\n"
         "ТВОЯ ЗАДАЧА:\n"
         "1. Сохрани вирусный ХУК и базовую структуру пользы.\n"
-        "2. ПОЛНОСТЬЮ перепиши текст карточек голосом Амалии (бьюти-бизнес, живая речь, бытовые образы, рубленые добивки, короткое тире '-', ЗАПРЕТ на 'не потому что X, а Y' и канцелярит).\n"
-        "3. В начале ответа дай краткий комментарий: в чём был хук и что мы усилили под голос Амалии.\n"
+        "2. ПОЛНОСТЬЮ перепиши текст карточек живым голосом эксперта (бьюти-бизнес, живая речь, бытовые образы, рубленые добивки, короткое тире '-', ЗАПРЕТ на 'не потому что X, а Y' и канцелярит).\n"
+        "3. В начале ответа дай краткий комментарий: в чём был хук и что мы усилили под голос эксперта.\n"
         "4. Затем сформируй строгий JSON-массив карточек для Дизайнера (1080x1350):\n"
         "```json\n"
         "[\n"
@@ -62,7 +62,7 @@ async def remake_competitor_carousel(source_text: str = "", image_bytes: bytes =
         "    \"type\": \"cover\",\n"
         "    \"title\": [[\"Заголовок обложки\", \"INK\"], [\"акцент\", \"BLUE\"]],\n"
         "    \"lead\": \"Лид обложки на 2 предложения\",\n"
-        "    \"quote\": \"Хлёсткая цитата Амалии\"\n"
+        "    \"quote\": \"Хлёсткая цитата эксперта\"\n"
         "  },\n"
         "  {\n"
         "    \"type\": \"break\",\n"

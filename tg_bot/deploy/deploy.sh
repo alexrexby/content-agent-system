@@ -2,8 +2,8 @@
 set -e
 
 SERVER="${1:-root@31.77.148.115}"
-KEY="${2:-$HOME/.ssh/amalia_prod}"
-REMOTE_DIR="/opt/amalia_team_bot"
+KEY="${2:-$HOME/.ssh/content_agent_prod}"
+REMOTE_DIR="/opt/content_agent_bot"
 
 echo "🚀 [1/3] Синхронизация файлов проекта на $SERVER:$REMOTE_DIR..."
 rsync -avz -e "ssh -i $KEY -o StrictHostKeyChecking=no" \

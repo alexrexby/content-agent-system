@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Генератор карточек карусели для @amalia_pro_beauty_
+Генератор карточек карусели для @expert_channel
 1080x1350 (4:5). Палитра: белый фон, голубые перебивки, серый в тексте.
 
 НОВУЮ КАРУСЕЛЬ ДЕЛАЕШЬ ТАК: добавляешь блок в DECKS внизу файла. Вёрстка считается сама.
@@ -48,7 +48,7 @@ def font(style, size):
     return ImageFont.load_default()
 BLACK_, HEAVY, BOLD, SEMI, MED, REG = "Black", "Heavy", "Bold", "Semibold", "Medium", "Regular"
 
-NICK = "@amalia_pro_beauty_"
+NICK = os.getenv("EXPERT_HANDLE", "@expert_channel")
 
 # ---------- текст ----------
 def wrap(draw, text, fnt, max_w):
@@ -123,7 +123,7 @@ def card(img, box, radius, fill, outline=None, sh=True, **kw):
                         outline=outline+(255,) if outline else None, width=2 if outline else 0)
 
 def _photo_path():
-    for n in ("photo.jpg", "photo.jpeg", "photo.png", "amalia.jpg"):
+    for n in ("photo.jpg", "photo.jpeg", "photo.png", "avatar.jpg", "avatar.png"):
         p = os.path.join(HERE, n)
         if os.path.exists(p): return p
     return None

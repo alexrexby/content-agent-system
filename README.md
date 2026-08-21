@@ -59,7 +59,7 @@ flowchart TD
 
 ### 3. Скиллы для ИИ-ассистентов (`.agents/skills/`, `.claude/`, `.codex/`)
 - Совместимы с **Claude Code**, **OpenAI Codex**, **Google Antigravity IDE** и **Antigravity CLI**:
-  - `amalia-storytelling` — сценарии сторис по кадрам с интерактивами.
+  - `expert-storytelling` — сценарии сторис по кадрам с интерактивами.
   - `tg-channel-posts` — прогревающие контент-планы и публикации для Telegram.
   - `visp-hooks` — формула ВИСП для Reels и заголовков.
 

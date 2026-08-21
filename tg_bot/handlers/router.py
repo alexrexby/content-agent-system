@@ -24,7 +24,7 @@ FORUM_TOPICS = [
     {
         "name": "✍️ Копирайтер",
         "role": "copywriter",
-        "welcome": "✍️ <b>Копирайтер команды Амалии</b>\n\nПишите задачи на посты в Telegram-канал, серии Stories, прогревы к вебинарам/Системе или хуки по ВИСП для Reels.\nЯ упакую смыслы живым языком Амалии с ее бытовыми образами и рублеными добивками."
+        "welcome": "✍️ <b>Копирайтер команды</b>\n\nПишите задачи на посты в Telegram-канал, серии Stories, прогревы к вебинарам и продуктам или хуки по ВИСП для Reels.\nЯ упакую смыслы живым языком эксперта с точными образами и рублеными добивками."
     },
     {
         "name": "🎨 Дизайнер",
@@ -34,12 +34,12 @@ FORUM_TOPICS = [
     {
         "name": "🔍 Главред",
         "role": "editor",
-        "welcome": "🔍 <b>Главный редактор и Факт-чекер</b>\n\nПрисылайте готовые тексты на аудит. Я проверю соответствие первоисточникам (01 Материалы), вычищу стоп-слова («не потому что X, а Y», канцелярит, инфостиль), проверю тире «-» и правило «диагноз бесплатно, лечение в продукте»."
+        "welcome": "🔍 <b>Главный редактор и Факт-чекер</b>\n\nПрисылайте готовые тексты на аудит. Я проверю соответствие первоисточникам (materials/), вычищу стоп-слова («не потому что X, а Y», канцелярит, инфостиль), проверю тире «-» и правило «диагноз бесплатно, лечение в продукте»."
     },
     {
         "name": "🎙 Смысловик",
         "role": "analyst",
-        "welcome": "🎙 <b>Смысловик и Аналитик созвонов</b>\n\nСкидывайте сюда аудиозаписи, голосовые, кружки или файлы транскриптов (.docx, .pdf, .txt, .html).\nЯ моментально вытащу: задачи по исполнителям, дословные цитаты Амалии и смысловые блоки для контента."
+        "welcome": "🎙 <b>Смысловик и Аналитик созвонов</b>\n\nСкидывайте сюда аудиозаписи, голосовые, кружки или файлы транскриптов (.docx, .pdf, .txt, .html).\nЯ моментально вытащу: задачи по исполнителям, дословные цитаты эксперта и смысловые блоки для контента."
     },
     {
         "name": "⚙️ Техспециалист",
@@ -49,7 +49,7 @@ FORUM_TOPICS = [
 ]
 
 HELP_TEXT = """
-👋 <b>Команда специалистов проекта Амалии Саргсян в сборе!</b>
+👋 <b>Команда специалистов Content Agent System в сборе!</b>
 
 👥 <b>Специалисты в команде:</b>
 • ✍️ <b>Копирайтер</b> — посты в канал, сценарии Stories, хуки ВИСП и прогревы
@@ -128,7 +128,7 @@ async def cmd_status(message: types.Message):
     razbor_count = len(list(RAZBOR_DIR.glob("*.md"))) if RAZBOR_DIR.exists() else 0
     await message.answer(
         f"✅ <b>Команда активна и готова к работе!</b>\n\n"
-        f"📁 Файлов в 01 Материалы: <code>{mat_count}</code> (транскрипты и выгрузки канала)\n"
+        f"📁 Файлов в materials/: <code>{mat_count}</code> (транскрипты и выгрузки канала)\n"
         f"📝 Разборов в 02 Разборы созвонов: <code>{razbor_count}</code>\n"
         f"🧠 Мозг: Google Antigravity CLI (agy)",
         parse_mode="HTML"
@@ -191,7 +191,7 @@ def determine_role(message: types.Message) -> tuple[str, str]:
     thread_id = message.message_thread_id
 
     if text.startswith("/post") or text.startswith("/hooks") or text.startswith("/story"):
-        return "copywriter", text.replace("/post", "").replace("/hooks", "").replace("/story", "").strip() or "Напиши пост в Telegram-канал голосом Амалии."
+        return "copywriter", text.replace("/post", "").replace("/hooks", "").replace("/story", "").strip() or "Напиши пост в Telegram-канал живым голосом эксперта."
     elif text.startswith("/karusel"):
         return "designer", text.replace("/karusel", "").strip() or "Собери карусель."
     elif text.startswith("/check"):
@@ -242,8 +242,8 @@ async def cmd_insta(message: types.Message):
         await message.answer(
             "🎬 <b>Отправьте ссылку на Instagram Reels или пост/карусель</b>\n\n"
             "Пример: <code>/insta https://www.instagram.com/p/C_...</code>\n"
-            "• Для Reels: я скачаю видео, расшифрую речь Амалии и подготовлю пост для Telegram.\n"
-            "• Для карусели: я скачаю карточки, перепишу голосом Амалии и сверстаю готовый альбом PNG!",
+            "• Для Reels: я скачаю видео, расшифрую речь эксперта и подготовлю пост для Telegram.\n"
+            "• Для карусели: я скачаю карточки, перепишу живым голосом эксперта и сверстаю готовый альбом PNG!",
             parse_mode="HTML"
         )
         return
@@ -321,7 +321,7 @@ async def handle_document(message: types.Message):
     if not caption:
         if "созвон" in file_name.lower() or "транскрипт" in file_name.lower():
             role = "analyst"
-            prompt = f"Разбери транскрипт созвона {file_name} и выдели главные смыслы, задачи и цитаты Амалии."
+            prompt = f"Разбери транскрипт созвона {file_name} и выдели главные смыслы, задачи и дословные цитаты эксперта."
         else:
             prompt = f"Разбери документ {file_name}."
     
@@ -351,7 +351,7 @@ async def handle_audio(message: types.Message):
     audio_bytes = audio_bytes_io.getvalue()
     
     mime_type = getattr(audio_obj, "mime_type", "audio/ogg") or "audio/ogg"
-    caption = message.caption or "Расшифруй аудио, сделай разбор созвона/голосового: выдели задачи, смыслы для контента и цитаты Амалии."
+    caption = message.caption or "Расшифруй аудио, сделай разбор созвона/голосового: выдели задачи, смыслы для контента и дословные цитаты эксперта."
     
     response, model_name = await run_agent_task(
         role="analyst",
@@ -371,12 +371,12 @@ async def cmd_adapt(message: types.Message):
             "🎨 <b>Отправьте текст или скриншот чужой карусели</b>\n\n"
             "Пример: <code>/adapt [текст карусели конкурента]</code>\n"
             "Или просто пришлите скриншоты в ветку <b>🎨 Дизайнер</b>.\n"
-            "Дизайнер и Копирайтер возьмут хук и логику, перепишут в голос Амалии и сверстают готовые PNG-карточки 1080x1350!",
+            "Дизайнер и Копирайтер возьмут хук и логику, перепишут в голос эксперта и сверстают готовые PNG-карточки 1080x1350!",
             parse_mode="HTML"
         )
         return
 
-    wait_msg = await message.answer("🎨 <b>Адаптирую чужую карусель под голос Амалии и верстаю карточки...</b>", parse_mode="HTML")
+    wait_msg = await message.answer("🎨 <b>Адаптирую чужую карусель под голос эксперта и верстаю карточки...</b>", parse_mode="HTML")
     success, log, images, deck_name, model_name, explanation = await remake_competitor_carousel(source_text=args)
 
     if not images:
@@ -384,7 +384,7 @@ async def cmd_adapt(message: types.Message):
         return
 
     await wait_msg.edit_text(
-        f"✅ <b>Карусель успешно адаптирована под Амалию!</b>\n\n"
+        f"✅ <b>Карусель успешно адаптирована под эксперта!</b>\n\n"
         f"{explanation}\n\n"
         f"🖼 Слайдов: <b>{len(images)}</b> (1080x1350 PNG)\n"
         f"🧠 Модель: <i>{model_name}</i>\n\n"
@@ -403,21 +403,21 @@ async def handle_photo(message: types.Message):
     role, prompt = determine_role(message)
 
     # If sent to Designer or requested adaptation
-    if role in ("designer", "karusel") or any(w in caption.lower() for w in ("адаптир", "переделай", "карусель", "амали")):
-        wait_msg = await message.answer("🎨 <b>Дизайнер и Копирайтер</b> адаптируют чужую карусель под голос Амалии...", parse_mode="HTML")
+    if role in ("designer", "karusel") or any(w in caption.lower() for w in ("адаптир", "переделай", "карусель", "эксперт")):
+        wait_msg = await message.answer("🎨 <b>Дизайнер и Копирайтер</b> адаптируют чужую карусель под голос эксперта...", parse_mode="HTML")
         file_info = await message.bot.get_file(photo.file_id)
         img_bytes_io = io.BytesIO()
         await message.bot.download_file(file_info.file_path, destination=img_bytes_io)
         image_bytes = img_bytes_io.getvalue()
 
         success, log, images, deck_name, model_name, explanation = await remake_competitor_carousel(
-            source_text=caption or "Адаптируй эту карточку/карусель конкурента для блога Амалии Саргсян.",
+            source_text=caption or "Адаптируй эту карточку/карусель конкурента для блога эксперта.",
             image_bytes=image_bytes
         )
 
         if images:
             await wait_msg.edit_text(
-                f"✅ <b>Готово! Карусель переписана голосом Амалии и сверстана:</b>\n\n"
+                f"✅ <b>Готово! Карусель переписана живым голосом эксперта и сверстана:</b>\n\n"
                 f"{explanation}\n\n"
                 f"🖼 Слайдов: <b>{len(images)}</b> (1080x1350 PNG)\n"
                 f"🧠 Модель: <i>{model_name}</i>",

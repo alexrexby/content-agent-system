@@ -1,12 +1,12 @@
 [Unit]
-Description=Amalia Project AI Agent Telegram Bot
+Description=Content Team AI Agent Telegram Bot
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/opt/amalia_bot
-ExecStart=/opt/amalia_bot/venv/bin/python -m tg_bot.main
+WorkingDirectory=/opt/content_agent_bot
+ExecStart=/opt/content_agent_bot/venv/bin/python -m tg_bot.main
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
