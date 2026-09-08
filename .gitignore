@@ -60,3 +60,7 @@ Thumbs.db
 materials/
 analysis/
 content/
+
+# Local Database & Storage
+data/
+*.db

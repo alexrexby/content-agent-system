@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import io
 import html
@@ -5,7 +6,7 @@ import asyncio
 from pathlib import Path
 from aiogram import Router, F, types
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, InputMediaPhoto
+from aiogram.types import FSInputFile, InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 
 from tg_bot.config import MATERIALS_DIR, RAZBOR_DIR
 from tg_bot.engine.agent_runner import run_agent_task
@@ -13,18 +14,38 @@ from tg_bot.engine.file_extractor import extract_text_from_file
 from tg_bot.engine.carousel_builder import run_build_karusel, build_dynamic_carousel, remake_competitor_carousel, AVAILABLE_DECKS
 from tg_bot.engine.formatter import markdown_to_telegram_html
 from tg_bot.engine.insta_monitor import is_instagram_url, extract_instagram_url, analyze_instagram_post
-
+from tg_bot.engine.prompts import STYLE_TITLES, resolve_style_name
+from tg_bot.engine.knowledge_base import index_materials_directory, search_knowledge
+from tg_bot.engine.insta_batch import analyze_competitor_profile
+from tg_bot.engine.video_pipeline import process_video_montage
+from tg_bot.engine.browser_worker import (
+    take_page_screenshot, execute_web_recipe, is_playwright_available, SESSION_STATE_FILE
+)
+from tg_bot.engine.outreach_worker import (
+    add_lead, get_outreach_summary, run_outreach_dispatch
+)
 
 router = Router()
 
-
 TOPIC_ROLES = {}
+PENDING_POST_TOPICS: dict[int, str] = {}
+
+def get_styles_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🎭 1. Драма & Факап", callback_data="style:drama")],
+            [InlineKeyboardButton(text="🔥 2. Провокация & Мифбастер", callback_data="style:provocation")],
+            [InlineKeyboardButton(text="📋 3. Чек-лист & Регламент", callback_data="style:checklist")],
+            [InlineKeyboardButton(text="📊 4. Аналитика & Цифры", callback_data="style:analytics")],
+            [InlineKeyboardButton(text="🏛 5. Манифест & Ценности", callback_data="style:manifest")]
+        ]
+    )
 
 FORUM_TOPICS = [
     {
         "name": "✍️ Копирайтер",
         "role": "copywriter",
-        "welcome": "✍️ <b>Копирайтер команды</b>\n\nПишите задачи на посты в Telegram-канал, серии Stories, прогревы к вебинарам и продуктам или хуки по ВИСП для Reels.\nЯ упакую смыслы живым языком эксперта с точными образами и рублеными добивками."
+        "welcome": "✍️ <b>Копирайтер команды</b>\n\nПишите задачи на посты в Telegram-канал, серии Stories, прогревы к вебинарам и продукты.\nПоддерживается 5 стилей лонгридов (Драма, Провокация, Чек-лист, Аналитика, Манифест).\nИспользуйте команду <code>/post [стиль] [тема]</code>."
     },
     {
         "name": "🎨 Дизайнер",
@@ -44,7 +65,7 @@ FORUM_TOPICS = [
     {
         "name": "⚙️ Техспециалист",
         "role": "tech",
-        "welcome": "⚙️ <b>Технический специалист</b>\n\nОтвечаю за инфраструктуру: сервер, работу бота, Antigravity CLI (agy), лендинги, GetCourse и деплой.\nЗадавайте вопросы по технической части или отправляйте команды <code>/status</code>, <code>/deploy</code>."
+        "welcome": "⚙️ <b>Технический специалист</b>\n\nОтвечаю за инфраструктуру: сервер, работу бота, Antigravity CLI (agy), базу знаний FTS5, карусели и деплой.\nЗадавайте вопросы по технической части или отправляйте команды <code>/status</code>, <code>/index</code>."
     }
 ]
 
@@ -52,26 +73,33 @@ HELP_TEXT = """
 👋 <b>Команда специалистов Content Agent System в сборе!</b>
 
 👥 <b>Специалисты в команде:</b>
-• ✍️ <b>Копирайтер</b> — посты в канал, сценарии Stories, хуки ВИСП и прогревы
+• ✍️ <b>Копирайтер</b> — 5 стилей лонгридов, сценарии Stories, хуки ВИСП и прогревы
 • 🎨 <b>Дизайнер</b> — генерация каруселей 1080x1350 (PNG), визуал
 • 🔍 <b>Главред</b> — факт-чекинг, вычитка стоп-слов, контроль голоса
 • 🎙 <b>Смысловик</b> — расшифровка аудио/созвонов, извлечение задач и цитат
-• ⚙️ <b>Техспециалист</b> — инфраструктура, сервер, бот, GetCourse
+• ⚙️ <b>Техспециалист</b> — инфраструктура, сервер, бот, база знаний FTS5
 
-📌 <b>Как создать ветки в группе:</b>
-1. Включите <b>«Темы» (Topics)</b> в настройках вашей группы Telegram.
-2. Отправьте в группу команду <code>/setup_forum</code> — бот автоматически создаст все 5 веток специалистов с инструкциями!
+📌 <b>5 стилей лонгридов (/post):</b>
+1. 🎭 <b>Драма</b> — личная история, факап и преодоление (доверие)
+2. 🔥 <b>Провокация</b> — мифбастер, слом шаблона (комментарии)
+3. 📋 <b>Чек-лист</b> — пошаговая инструкция, регламент (сохранения)
+4. 📊 <b>Аналитика</b> — юнит-экономика, цифры, окупаемость (статус)
+5. 🏛 <b>Манифест</b> — принципы эксперта, философия, фильтр ЦА
 
 📌 <b>Команды для любого чата:</b>
-• <code>/setup_forum</code> — создание веток специалистов в группе
-• <code>/post [тема]</code> — задача для Копирайтера
-• <code>/karusel [тема]</code> — задача для Дизайнера (сборка PNG)
+• <code>/post [стиль] [тема]</code> — генерация поста (со стилем или кнопками)
+• <code>/karusel [тема]</code> — задача для Дизайнера (сборка PNG 1080x1350)
 • <code>/check [текст]</code> — задача для Главреда (аудит)
 • <code>/sozvon [файл/аудио]</code> — задача для Смысловика (разбор)
-• <code>/insta [ссылка на Reels]</code> — скачать, расшифровать и разобрать рилс
-• <code>/status</code> — статус бота, материалов и системы
+• <code>/insta [ссылка на Reels/пост]</code> — скачать, расшифровать и разобрать рилс
+• <code>/spy [аккаунт] [лимит]</code> — пакетный парсинг рилсов конкурента (топ-виральные, хуки, офферы)
+• <code>/montage [видео]</code> — авто-монтаж: вырезка пауз + стильные субтитры 9:16
+• <code>/browser [URL]</code> — браузерный агент (скриншот страницы Playwright)
+• <code>/outreach [stats|add|send]</code> — PR-аутрич блогеров и запуск рассылки
+• <code>/index</code> — переиндексация базы знаний FTS5
+• <code>/status</code> — статус бота, материалов и базы знаний
+• <code>/setup_forum</code> — создание веток специалистов в группе
 """
-
 
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
@@ -128,12 +156,85 @@ async def cmd_status(message: types.Message):
     razbor_count = len(list(RAZBOR_DIR.glob("*.md"))) if RAZBOR_DIR.exists() else 0
     await message.answer(
         f"✅ <b>Команда активна и готова к работе!</b>\n\n"
-        f"📁 Файлов в materials/: <code>{mat_count}</code> (транскрипты и выгрузки канала)\n"
+        f"📁 Файлов в materials/: <code>{mat_count}</code> (транскрипты и выгрузки)\n"
         f"📝 Разборов в 02 Разборы созвонов: <code>{razbor_count}</code>\n"
+        f"🔍 База знаний FTS5: <code>активна (SQLite WAL)</code>\n"
+        f"🌐 Браузер: <code>{'Playwright готов' if is_playwright_available() else 'Playwright не установлен'}</code>\n"
         f"🧠 Мозг: Google Antigravity CLI (agy)",
         parse_mode="HTML"
     )
 
+@router.message(Command("index"))
+async def cmd_index(message: types.Message):
+    wait_msg = await message.answer("🔄 <b>Индексирую материалы проекта в базу знаний SQLite FTS5...</b>", parse_mode="HTML")
+    count = index_materials_directory(MATERIALS_DIR)
+    await wait_msg.edit_text(
+        f"✅ <b>База знаний FTS5 успешно обновлена!</b>\n\n"
+        f"📚 Проиндексировано документов: <b>{count}</b>\n"
+        f"Теперь Копирайтер и Главред мгновенно находят цитаты и цифры эксперта по запросам.",
+        parse_mode="HTML"
+    )
+
+@router.message(Command("post"))
+async def cmd_post(message: types.Message):
+    args = message.text.replace("/post", "").strip()
+    if not args:
+        await message.answer(
+            "✍️ <b>Написание поста живым голосом эксперта</b>\n\n"
+            "Отправьте команду с темой:\n"
+            "<code>/post Почему уходят мастера из салона</code>\n\n"
+            "Или укажите номер/название стиля сразу:\n"
+            "• <code>/post 1 [тема]</code> — 🎭 Драма и факап\n"
+            "• <code>/post 2 [тема]</code> — 🔥 Провокация и мифбастер\n"
+            "• <code>/post 3 [тема]</code> — 📋 Чек-лист и регламент\n"
+            "• <code>/post 4 [тема]</code> — 📊 Аналитика и цифры\n"
+            "• <code>/post 5 [тема]</code> — 🏛 Философия и манифест",
+            parse_mode="HTML"
+        )
+        return
+
+    # Check if first word is a style key (1..5 or name)
+    parts = args.split(maxsplit=1)
+    first_word = parts[0].lower()
+    canonical_style = resolve_style_name(first_word)
+
+    if canonical_style and len(parts) > 1:
+        topic = parts[1].strip()
+        style_title = STYLE_TITLES.get(canonical_style, canonical_style)
+        wait_msg = await message.answer(
+            f"⏳ ✍️ <b>Копирайтер</b> пишет лонгрид в стиле:\n<b>{style_title}</b>\n\nТема: <i>«{topic}»</i>...",
+            parse_mode="HTML"
+        )
+        response, model_name = await run_agent_task(role="copywriter", user_prompt=topic, style=canonical_style)
+        await send_formatted_response(message, wait_msg, response, model_name=model_name)
+    else:
+        # Prompt provided without explicit style -> show interactive buttons
+        PENDING_POST_TOPICS[message.from_user.id] = args
+        await message.answer(
+            f"✍️ <b>Тема лонгрида:</b> <i>«{args}»</i>\n\n"
+            "Выберите стиль публикации:",
+            reply_markup=get_styles_keyboard(),
+            parse_mode="HTML"
+        )
+
+@router.callback_query(F.data.startswith("style:"))
+async def callback_select_style(callback: types.CallbackQuery):
+    await callback.answer()
+    raw_style = callback.data.split(":", 1)[1]
+    canonical_style = resolve_style_name(raw_style)
+    style_title = STYLE_TITLES.get(canonical_style, canonical_style)
+    
+    topic = PENDING_POST_TOPICS.pop(callback.from_user.id, "")
+    if not topic:
+        topic = "Экспертный пост для Telegram-канала по методологии проекта"
+
+    wait_msg = await callback.message.edit_text(
+        f"⏳ ✍️ <b>Копирайтер</b> пишет лонгрид в стиле:\n<b>{style_title}</b>\n\nТема: <i>«{topic}»</i>...",
+        parse_mode="HTML"
+    )
+    
+    response, model_name = await run_agent_task(role="copywriter", user_prompt=topic, style=canonical_style)
+    await send_formatted_response(callback.message, wait_msg, response, model_name=model_name)
 
 async def handle_carousel_generation(message: types.Message, query: str):
     """Handles both template rendering and dynamic AI generation."""
@@ -256,9 +357,234 @@ async def cmd_insta(message: types.Message):
         if media_group:
             await message.answer_media_group(media=media_group)
 
+
+@router.message(Command("spy"))
+async def cmd_spy(message: types.Message):
+    args = message.text.replace("/spy", "").strip()
+    if not args:
+        await message.answer(
+            "🕵️‍♂️ <b>Пакетный шпионаж и аудит конкурентов</b>\n\n"
+            "Пример: <code>/spy @alexyanovsky 40</code>\n"
+            "Или: <code>/spy username</code>\n\n"
+            "Что делает агент:\n"
+            "• Парсит до 100 последних рилсов аккаунта\n"
+            "• Вычисляет медианные просмотры и фильтрует виральные рилсы (x2.0+)\n"
+            "• Извлекает хуки (первые 3 сек), структуры, офферы и триггеры\n"
+            "• Сохраняет отчёт в <code>data/competitors/</code> и индексирует в базу знаний FTS5",
+            parse_mode="HTML"
+        )
+        return
+
+    parts = args.split()
+    target_username = parts[0]
+    limit = 40
+    if len(parts) > 1 and parts[1].isdigit():
+        limit = min(int(parts[1]), 100)
+
+    wait_msg = await message.answer(
+        f"🕵️‍♂️ <b>Шпионю за аккаунтом @{target_username.lstrip('@')}...</b>\n"
+        f"Сбор до {limit} публикаций, расчет виральности (x2.0+), декомпозиция хуков и офферов.\n"
+        "Пожалуйста, подождите...",
+        parse_mode="HTML"
+    )
+
+    try:
+        report, model_name, stats = await analyze_competitor_profile(target_username, max_count=limit)
+        await send_formatted_response(message, wait_msg, report, model_name=model_name)
+    except Exception as e:
+        await wait_msg.edit_text(f"⚠️ Ошибка при анализе конкурента: {html.escape(str(e))}", parse_mode="HTML")
+
+@router.message(Command("browser"))
+async def cmd_browser(message: types.Message):
+    args = message.text.replace("/browser", "").strip()
+    if not args:
+        await message.answer(
+            "🌐 <b>Браузерный агент Playwright</b>\n\n"
+            "Используется для взаимодействия с Tilda, GetCourse, веб-страницами и скриншотинга.\n\n"
+            "Примеры команд:\n"
+            "• <code>/browser https://ya.ru</code> — снять скриншот веб-страницы\n"
+            "• <code>/browser status</code> — статус Playwright и директории браузера",
+            parse_mode="HTML"
+        )
+        return
+
+    if args.startswith("http://") or args.startswith("https://"):
+        wait_msg = await message.answer(f"🌐 <b>Открываю браузер и загружаю</b> <code>{args}</code>...", parse_mode="HTML")
+        success, shot_path, log = await take_page_screenshot(args)
+        if success and shot_path and shot_path.exists():
+            await message.answer_photo(
+                photo=FSInputFile(str(shot_path)),
+                caption=f"📸 <b>Скриншот страницы:</b>\n<code>{args}</code>\n\n{log}",
+                parse_mode="HTML"
+            )
+            await wait_msg.delete()
+        else:
+            await wait_msg.edit_text(f"⚠️ Ошибка браузера:\n<code>{html.escape(log)}</code>", parse_mode="HTML")
+    else:
+        if args == "status":
+            avail = is_playwright_available()
+            has_session = SESSION_STATE_FILE.exists()
+            await message.answer(
+                f"🌐 <b>Статус браузерного агента:</b>\n\n"
+                f"• Playwright установлен: <b>{'Да' if avail else 'Нет'}</b>\n"
+                f"• Сессия авторизации (storage_state): <b>{'Сохранена' if has_session else 'Не настроена'}</b>\n"
+                f"• Браузерный движок: Chromium Headless",
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer(
+                "🌐 <b>Укажите URL для скриншота:</b> <code>/browser https://...</code>",
+                parse_mode="HTML"
+            )
+
+@router.message(Command("outreach"))
+async def cmd_outreach(message: types.Message):
+    args = message.text.replace("/outreach", "").strip()
+    if not args or args == "stats":
+        summary = get_outreach_summary()
+        await message.answer(
+            f"📢 <b>Агент Аутрича и PR-переговоров</b>\n\n"
+            f"{summary}\n\n"
+            "Команды управления:\n"
+            "• <code>/outreach add @username [канал]</code> — добавить контакт блогера в базу\n"
+            "• <code>/outreach send</code> — безопасная отправка питчей из очереди (userbot)\n"
+            "• <code>/outreach stats</code> — статистика по лидам",
+            parse_mode="HTML"
+        )
+        return
+
+    if args.startswith("add"):
+        parts = args.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.answer("⚠️ Укажите username: <code>/outreach add @username [канал]</code>", parse_mode="HTML")
+            return
+        username = parts[1]
+        channel = parts[2] if len(parts) > 2 else ""
+        ok, res = add_lead(username=username, channel_name=channel)
+        await message.answer(f"{'✅' if ok else '⚠️'} {res}", parse_mode="HTML")
+        return
+
+    if args == "send" or args.startswith("send"):
+        wait_msg = await message.answer("📢 <b>Запуск безопасной отправки питчей через userbot...</b>", parse_mode="HTML")
+        sent_count, report = await run_outreach_dispatch(limit=5)
+        await wait_msg.edit_text(
+            f"📢 <b>Результат отправки аутрича:</b>\n\n{report}",
+            parse_mode="HTML"
+        )
+        return
+
+    await message.answer("Неизвестная подкоманда. Используйте <code>/outreach</code> для справки.", parse_mode="HTML")
+
+async def handle_video_file_processing(message: types.Message, video_obj: types.Video, caption_prompt: str = ""):
+    wait_msg = await message.answer(
+        "🎬 <b>Начинаю монтаж видео...</b>\n"
+        "• Скачивание файла из Telegram\n"
+        "• Вырезание пауз и вздохов (<code>ffmpeg silenceremove</code>)\n"
+        "• Распознавание речи с таймкодами (Whisper)\n"
+        "• Стилизация вертикальных субтитров (9:16 ASS)\n"
+        "• Финальный рендеринг MP4...",
+        parse_mode="HTML"
+    )
+
+    temp_dir = MATERIALS_DIR / "temp_video"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    raw_video_path = temp_dir / f"raw_{message.message_id}_{video_obj.file_unique_id}.mp4"
+
+    try:
+        file_info = await message.bot.get_file(video_obj.file_id)
+        await message.bot.download_file(file_info.file_path, destination=raw_video_path)
+
+        success, final_video_path, log_msg = await process_video_montage(
+            raw_video_path, cut_pauses=True, add_subs=True
+        )
+
+        if success and final_video_path and final_video_path.exists():
+            await wait_msg.edit_text("📤 <b>Отправляю смонтированное видео...</b>", parse_mode="HTML")
+            await message.answer_video(
+                video=FSInputFile(str(final_video_path)),
+                caption=f"🎬 <b>Видео успешно смонтировано!</b>\n\n{log_msg[:900]}",
+                parse_mode="HTML"
+            )
+            await wait_msg.delete()
+        else:
+            await wait_msg.edit_text(
+                f"⚠️ Не удалось смонтировать видео:\n<code>{html.escape(log_msg)}</code>",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        await wait_msg.edit_text(f"⚠️ Ошибка при обработке видео: {html.escape(str(e))}", parse_mode="HTML")
+    finally:
+        if raw_video_path.exists():
+            try:
+                raw_video_path.unlink()
+            except Exception:
+                pass
+
+@router.message(Command("montage"))
+async def cmd_montage(message: types.Message):
+    video_obj = None
+    if message.reply_to_message and message.reply_to_message.video:
+        video_obj = message.reply_to_message.video
+    elif message.video:
+        video_obj = message.video
+
+    if not video_obj:
+        await message.answer(
+            "🎬 <b>Автоматический монтаж видео через агента</b>\n\n"
+            "Как использовать:\n"
+            "1. Отправьте видео в чат с подписью <code>/montage</code>\n"
+            "2. Или отправьте видео напрямую — бот предложит монтаж\n"
+            "3. Или сделайте Reply на видео с командой <code>/montage</code>\n\n"
+            "🔧 Конвейер:\n"
+            "• Детекция тишины (<-32dB >0.35s) и склейка без пауз\n"
+            "• Распознавание речи через Whisper с точными таймкодами\n"
+            "• Стилизация 9:16 субтитров (ASS с жёлтым акцентом и обводкой)\n"
+            "• Вжигание субтитров через ffmpeg в готовый MP4",
+            parse_mode="HTML"
+        )
+        return
+
+    await handle_video_file_processing(message, video_obj)
+
+@router.message(F.video)
+async def handle_video(message: types.Message):
+    caption = (message.caption or "").lower()
+    if "/montage" in caption or any(w in caption for w in ("монтаж", "нареж", "субтитр", "пауз")):
+        await handle_video_file_processing(message, message.video, caption)
+    else:
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🎬 Авто-монтаж (паузы + субтитры)",
+                        callback_data=f"montage:{message.message_id}"
+                    )
+                ]
+            ]
+        )
+        await message.answer(
+            "📹 <b>Видео получено!</b>\nХотите выполнить авто-монтаж (вырезка пауз + стильные 9:16 субтитры)?",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+
+@router.callback_query(F.data.startswith("montage:"))
+async def callback_montage(callback: types.CallbackQuery):
+    await callback.answer("Запускаю монтаж...")
+    target_msg = callback.message.reply_to_message or callback.message
+    if target_msg and target_msg.video:
+        await handle_video_file_processing(target_msg, target_msg.video)
+    else:
+        await callback.message.edit_text("⚠️ Видео не найдено. Отправьте видео снова с подписью /montage.")
+
+
 @router.message(F.text)
 async def handle_text(message: types.Message):
-    if message.text.startswith("/setup_forum") or message.text.startswith("/start") or message.text.startswith("/help") or message.text.startswith("/status") or message.text.startswith("/karusel") or message.text.startswith("/insta") or message.text.startswith("/adapt") or message.text.startswith("/remake"):
+    # Skip handled commands
+    if any(message.text.startswith(c) for c in (
+        "/setup_forum", "/start", "/help", "/status", "/karusel", 
+        "/insta", "/adapt", "/remake", "/post", "/index", "/spy", "/montage", "/browser", "/outreach"
+    )):
         return
 
     # Check if user sent an Instagram link directly
@@ -275,8 +601,6 @@ async def handle_text(message: types.Message):
             return
 
     role, prompt = determine_role(message)
-
-
 
     # In designer topic, trigger carousel generation
     if role in ("designer", "karusel"):
@@ -364,7 +688,6 @@ async def handle_audio(message: types.Message):
 
 @router.message(Command("adapt", "remake"))
 async def cmd_adapt(message: types.Message):
-
     args = message.text.replace("/adapt", "").replace("/remake", "").strip()
     if not args:
         await message.answer(
@@ -446,4 +769,3 @@ async def handle_photo(message: types.Message):
     )
     
     await send_formatted_response(message, wait_msg, response, model_name=model_name)
-

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import io
 import shutil
@@ -6,6 +7,7 @@ import subprocess
 from pathlib import Path
 from tg_bot.config import POLZA_API_KEY, AI_BASE_URL, CLAUDE_MODEL, GEMINI_API_KEY, MATERIALS_DIR
 from tg_bot.engine.prompts import get_system_prompt_for_role
+from tg_bot.engine.knowledge_base import get_relevant_context
 
 async def transcribe_audio_bytes(audio_bytes: bytes, filename: str = "audio.ogg") -> str:
     """Transcribes audio using Whisper / Polza API."""
@@ -71,25 +73,35 @@ async def run_agent_task(
     role: str,
     user_prompt: str,
     attachment_text: str = "",
+    style: str = "",
     image_bytes: bytes | None = None,
     audio_bytes: bytes | None = None,
     mime_type: str | None = None
 ) -> tuple[str, str]:
     """
     Executes an agent task primarily via AGY CLI / Google Antigravity Agent runtime,
-    with automatic fallbacks. Returns (response_text, model_name).
+    with automatic fallbacks. Supports explicit style for copywriter role.
+    Returns (response_text, model_name).
     """
-    system_instruction = get_system_prompt_for_role(role)
+    system_instruction = get_system_prompt_for_role(role, style=style)
     
     # If audio is attached, transcribe it first
     if audio_bytes:
         transcribed_text = await transcribe_audio_bytes(audio_bytes, filename=f"voice.{'mp3' if 'mp3' in (mime_type or '') else 'ogg'}")
         attachment_text = (attachment_text + "\n\n" if attachment_text else "") + f"[РАСШИФРОВКА АУДИОЗАПИСИ]:\n{transcribed_text}"
 
-    # Context injection from project materials
+    # Context injection: First try FTS5 full-text search in knowledge.db
     context_intro = ""
-    if role in ["content", "hooks", "fakt-check"]:
-        if MATERIALS_DIR.exists():
+    if role in ["content", "hooks", "fakt-check", "copywriter", "копирайтер"]:
+        try:
+            fts_context = get_relevant_context(user_prompt, max_chars=2500)
+            if fts_context:
+                context_intro = fts_context + "\n"
+        except Exception:
+            pass
+
+        # Fallback to listing files if FTS5 returned nothing
+        if not context_intro and MATERIALS_DIR.exists():
             files = sorted(list(MATERIALS_DIR.glob("*.*")), key=os.path.getmtime, reverse=True)[:3]
             file_names = [f.name for f in files]
             if file_names:
@@ -146,7 +158,7 @@ async def run_agent_task(
             res = await client.chat.completions.create(
                 model=CLAUDE_MODEL,
                 messages=messages,
-                temperature=0.6 if role in ["content", "hooks"] else 0.2,
+                temperature=0.6 if role in ["content", "hooks", "copywriter"] else 0.2,
                 max_tokens=4000
             )
             if res.choices and res.choices[0].message.content:

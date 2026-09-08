@@ -1,6 +1,48 @@
+from __future__ import annotations
 import re
 from pathlib import Path
 from tg_bot.config import BASE_DIR, AGENTS_MD_PATH
+
+STYLE_ALIASES = {
+    "1": "drama",
+    "drama": "drama",
+    "драма": "drama",
+    "факап": "drama",
+    "сторителлинг": "drama",
+    
+    "2": "provocation",
+    "provocation": "provocation",
+    "провокация": "provocation",
+    "миф": "provocation",
+    "мифбастер": "provocation",
+    
+    "3": "checklist",
+    "checklist": "checklist",
+    "чеклист": "checklist",
+    "чек-лист": "checklist",
+    "инструкция": "checklist",
+    "регламент": "checklist",
+    
+    "4": "analytics",
+    "analytics": "analytics",
+    "аналитика": "analytics",
+    "цифры": "analytics",
+    "экономика": "analytics",
+    
+    "5": "manifest",
+    "manifest": "manifest",
+    "манифест": "manifest",
+    "философия": "manifest",
+    "принципы": "manifest"
+}
+
+STYLE_TITLES = {
+    "drama": "1. 🎭 Драматический сторителлинг (Факап и преодоление)",
+    "provocation": "2. 🔥 Провокация и Мифбастер (Спорный тезис)",
+    "checklist": "3. 📋 Пошаговый регламент / Чек-лист (Инструкция)",
+    "analytics": "4. 📊 Бизнес-аналитика и цифры (Юнит-экономика)",
+    "manifest": "5. 🏛 Философия и Манифест (Принципы эксперта)"
+}
 
 def load_agents_md() -> str:
     """Reads the core AGENTS.md file containing mandatory rules."""
@@ -37,17 +79,36 @@ def load_skill_instructions(skill_name: str) -> str:
     except Exception:
         return ""
 
-def get_system_prompt_for_role(role: str) -> str:
+def resolve_style_name(raw_style: str) -> str:
+    """Resolves arbitrary style keyword or number to canonical style key."""
+    clean = raw_style.strip().lower()
+    return STYLE_ALIASES.get(clean, "")
+
+def get_system_prompt_for_role(role: str, style: str = "") -> str:
     """
     Builds a complete system prompt for a specialist role:
-    - copywriter (Копирайтер)
+    - copywriter (Копирайтер) [with optional style: drama, provocation, checklist, analytics, manifest]
     - designer (Дизайнер)
     - editor (Главред)
     - analyst (Смысловик)
     - tech (Техспециалист)
     """
     agents_core = load_agents_md()
+    canonical_style = resolve_style_name(style) if style else ""
     
+    style_instruction_block = ""
+    if canonical_style:
+        style_instruction = load_skill_instructions(f"style-{canonical_style}")
+        if style_instruction:
+            style_title = STYLE_TITLES.get(canonical_style, canonical_style)
+            style_instruction_block = f"""
+==================================================
+ВЫБРАННЫЙ СТИЛЬ ЛОНГРИДА: {style_title}
+СТРОГО СЛЕДУЙ ПРАВИЛАМ ЭТОГО СТИЛЯ:
+==================================================
+{style_instruction}
+"""
+
     role_prompts = {
         "copywriter": f"""
 Ты — Копирайтер команды эксперта.
@@ -65,6 +126,8 @@ def get_system_prompt_for_role(role: str) -> str:
 - Короткие рубленые фразы на добивку («Они есть.», «Вы не спасёте этот процесс вручную.»).
 - СТРОГИЙ ЗАПРЕТ: «не потому что X, а потому что Y», «дело не в X, а в Y», канцелярит, инфостиль.
 - Только короткое тире «-».
+
+{style_instruction_block}
 
 {load_skill_instructions("tg-channel-posts")}
 {load_skill_instructions("expert-storytelling")}
