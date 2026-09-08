@@ -1,4 +1,5 @@
 from __future__ import annotations
+from tg_bot.engine.learning_engine import get_learned_prompt_context, get_golden_examples
 import re
 from pathlib import Path
 from tg_bot.config import BASE_DIR, AGENTS_MD_PATH
@@ -226,6 +227,21 @@ def get_system_prompt_for_role(role: str, style: str = "") -> str:
     else:
         specific = role_prompts["copywriter"]
     
+    learned_context = get_learned_prompt_context()
+    golden_context = ''
+    if canonical_style:
+        goldens = get_golden_examples(canonical_style, limit=1)
+        if goldens:
+            st_name = STYLE_TITLES.get(canonical_style, canonical_style)
+            g_sample = goldens[0]['content'][:1500]
+            golden_context = '\n### ЗОЛОТОЙ ЭТАЛОН ДЛЯ СТИЛЯ ' + st_name + ':\n' + g_sample + '\n'
+    extra_learning = ''
+    if role_key in ('content', 'hooks', 'copywriter', 'копирайтер', 'fakt-check', 'voice-editor', 'editor', 'главред', 'факт-чек'):
+        if learned_context:
+            extra_learning += '\n' + learned_context + '\n'
+        if golden_context:
+            extra_learning += '\n' + golden_context + '\n'
+
     return f"""
 {agents_core}
 
@@ -233,6 +249,7 @@ def get_system_prompt_for_role(role: str, style: str = "") -> str:
 ТВОЯ РОЛЬ В КОМАНДЕ: {role.upper()}
 ==================================================
 {specific}
+{extra_learning}
 
 ==================================================
 ЖЕСТКИЕ ПРАВИЛА ФОРМАТА ОТВЕТА:

@@ -21,6 +21,14 @@ from tg_bot.engine.video_pipeline import process_video_montage
 from tg_bot.engine.browser_worker import (
     take_page_screenshot, execute_web_recipe, is_playwright_available, SESSION_STATE_FILE
 )
+from tg_bot.engine.learning_engine import (
+    add_rule, delete_rule, get_active_rules, add_golden_example,
+    record_draft, get_draft_by_message, analyze_diff_and_learn
+)
+from tg_bot.engine.recipe_runner import (
+    get_available_recipes, get_recipe_details, format_recipe_for_telegram, execute_recipe
+)
+from tg_bot.engine.recon_spider import build_dossier
 from tg_bot.engine.outreach_worker import (
     add_lead, get_outreach_summary, run_outreach_dispatch
 )
@@ -29,6 +37,16 @@ router = Router()
 
 TOPIC_ROLES = {}
 PENDING_POST_TOPICS: dict[int, str] = {}
+
+def get_post_feedback_keyboard(style: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⭐️ В эталоны", callback_data=f"golden:{style}"),
+                InlineKeyboardButton(text="💡 Как обучать?", callback_data="learn_hint")
+            ]
+        ]
+    )
 
 def get_styles_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -96,6 +114,11 @@ HELP_TEXT = """
 • <code>/montage [видео]</code> — авто-монтаж: вырезка пауз + стильные субтитры 9:16
 • <code>/browser [URL]</code> — браузерный агент (скриншот страницы Playwright)
 • <code>/outreach [stats|add|send]</code> — PR-аутрич блогеров и запуск рассылки
+• <code>/recon [username/URL]</code> — OSINT-разведка в стиле SpiderFoot (досье, стек, контакты)
+• <code>/recipes</code> — каталог проверенных рецептов решения задач (GetCourse, Tilda, VK)
+• <code>/recipe [домен]</code> — регламент и капканы работы с платформой (/recipe run)
+• <code>/learn [правило]</code> — обучение бота персональным правилам Tone of Voice
+• <code>/rules</code> — просмотр и управление выученными правилами (/delrule)
 • <code>/index</code> — переиндексация базы знаний FTS5
 • <code>/status</code> — статус бота, материалов и базы знаний
 • <code>/setup_forum</code> — создание веток специалистов в группе
@@ -206,7 +229,7 @@ async def cmd_post(message: types.Message):
             parse_mode="HTML"
         )
         response, model_name = await run_agent_task(role="copywriter", user_prompt=topic, style=canonical_style)
-        await send_formatted_response(message, wait_msg, response, model_name=model_name)
+        await send_formatted_response(message, wait_msg, response, model_name=model_name, reply_markup=get_post_feedback_keyboard(canonical_style))
     else:
         # Prompt provided without explicit style -> show interactive buttons
         PENDING_POST_TOPICS[message.from_user.id] = args
@@ -234,7 +257,7 @@ async def callback_select_style(callback: types.CallbackQuery):
     )
     
     response, model_name = await run_agent_task(role="copywriter", user_prompt=topic, style=canonical_style)
-    await send_formatted_response(callback.message, wait_msg, response, model_name=model_name)
+    await send_formatted_response(callback.message, wait_msg, response, model_name=model_name, reply_markup=get_post_feedback_keyboard(canonical_style))
 
 async def handle_carousel_generation(message: types.Message, query: str):
     """Handles both template rendering and dynamic AI generation."""
@@ -307,7 +330,7 @@ def determine_role(message: types.Message) -> tuple[str, str]:
 
     return "copywriter", text
 
-async def send_formatted_response(message: types.Message, wait_msg: types.Message | None, raw_response: str, model_name: str = ""):
+async def send_formatted_response(message: types.Message, wait_msg: types.Message | None, raw_response: str, model_name: str = "", reply_markup: InlineKeyboardMarkup | None = None):
     full_text = raw_response
     if model_name:
         full_text += f"\n\n---\n🧠 <i>Модель: {model_name}</i>"
@@ -321,9 +344,9 @@ async def send_formatted_response(message: types.Message, wait_msg: types.Messag
 
     try:
         if wait_msg:
-            await wait_msg.edit_text(chunks[0], parse_mode="HTML")
+            await wait_msg.edit_text(chunks[0], parse_mode="HTML", reply_markup=reply_markup if len(chunks) == 1 else None)
         else:
-            await message.answer(chunks[0], parse_mode="HTML")
+            await message.answer(chunks[0], parse_mode="HTML", reply_markup=reply_markup if len(chunks) == 1 else None)
             
         for chunk in chunks[1:]:
             await message.answer(chunk, parse_mode="HTML")
@@ -578,12 +601,182 @@ async def callback_montage(callback: types.CallbackQuery):
         await callback.message.edit_text("⚠️ Видео не найдено. Отправьте видео снова с подписью /montage.")
 
 
+
+@router.message(Command("learn"))
+async def cmd_learn(message: types.Message):
+    args = message.text.replace("/learn", "").strip()
+    if not args:
+        await message.answer(
+            "🧠 <b>Обучение и кодификация правил эксперта (/learn)</b>\n\n"
+            "Примеры:\n"
+            "• <code>/learn Никогда не начинай пост со слов 'Привет, друзья'</code>\n"
+            "• <code>/learn В темах про найм пиши 'тестовый день' вместо 'собеседование'</code>\n"
+            "• <code>/learn Не используй восклицательные знаки в заголовках</code>\n\n"
+            "Все выученные правила сразу внедряются в промпты Копирайтера и чек-лист Главреда!\n"
+            "Посмотреть список: <code>/rules</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    lower_args = args.lower()
+    if any(w in lower_args for w in ("не используй", "не пиши", "запрети", "стоп-слово", "убрать")):
+        category = "stop_word"
+    elif any(w in lower_args for w in ("вместо", "заменяй", "пиши именно", "термин")):
+        category = "preferred_term"
+    else:
+        category = "tone_rule"
+
+    ok, res = add_rule(category, args, source="user_explicit")
+    await message.answer(f"{'✅' if ok else '⚠️'} {res}\n\n<i>Правило активно и учитывается при генерации постов.</i>", parse_mode="HTML")
+
+@router.message(Command("rules"))
+async def cmd_rules(message: types.Message):
+    rules = get_active_rules()
+    if not rules:
+        await message.answer(
+            "🧠 <b>Выученные правила пока отсутствуют.</b>\n\n"
+            "Чтобы добавить первое правило, используйте:\n"
+            "<code>/learn [ваше правило или стоп-слово]</code>\n"
+            "Или просто ответьте (Reply) на сгенерированный пост отредактированным текстом!",
+            parse_mode="HTML"
+        )
+        return
+
+    cat_icons = {
+        "stop_word": "🚫 Стоп-слова",
+        "preferred_term": "🎯 Предпочтения",
+        "tone_rule": "⚖️ Тональность",
+        "format_rule": "📐 Формат"
+    }
+    lines = [f"🧠 <b>Активные выученные правила эксперта ({len(rules)} шт.):</b>\n"]
+    for r in rules:
+        cat_title = cat_icons.get(r["category"], r["category"])
+        lines.append(f"• <b>#{r['id']}</b> [{cat_title}]: «{r['rule_text']}»")
+
+    lines.append("\nЧтобы отключить правило: <code>/delrule [ID]</code>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+@router.message(Command("delrule"))
+async def cmd_delrule(message: types.Message):
+    args = message.text.replace("/delrule", "").strip()
+    if not args or not args.isdigit():
+        await message.answer("⚠️ Укажите числовой ID правила: <code>/delrule 1</code>", parse_mode="HTML")
+        return
+
+    ok, res = delete_rule(int(args))
+    await message.answer(f"{'✅' if ok else '⚠️'} {res}", parse_mode="HTML")
+
+@router.message(Command("recipes"))
+async def cmd_recipes(message: types.Message):
+    recipes = get_available_recipes()
+    if not recipes:
+        await message.answer("📖 Рецепты пока не найдены в каталоге.", parse_mode="HTML")
+        return
+
+    lines = [f"📖 <b>Проверенные рецепты автоматизации ({len(recipes)} шт.):</b>\n"]
+    for r in recipes:
+        lines.append(f"• <code>/recipe {r['domain']}</code> — <b>{r['title']}</b>\n  <i>{r['description'][:90]}...</i>")
+
+    lines.append("\nДля подробностей отправьте: <code>/recipe [домен]</code>\nДля выполнения в браузере: <code>/recipe run [домен]</code>")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+@router.message(Command("recipe"))
+async def cmd_recipe(message: types.Message):
+    raw_args = message.text.replace("/recipe", "").strip()
+    if not raw_args:
+        await cmd_recipes(message)
+        return
+
+    parts = raw_args.split()
+    if parts[0].lower() == "run":
+        if len(parts) < 2:
+            await message.answer("⚠️ Укажите домен рецепта: <code>/recipe run learn.amaliapro.biz</code>", parse_mode="HTML")
+            return
+        target_domain = parts[1]
+        wait_msg = await message.answer(f"⚙️ <b>Запуск рецепта</b> <code>{target_domain}</code> в браузере Playwright...", parse_mode="HTML")
+        ok, shot_path, log = await execute_recipe(target_domain)
+        if ok and shot_path and shot_path.exists():
+            await message.answer_photo(
+                photo=FSInputFile(str(shot_path)),
+                caption=log,
+                parse_mode="HTML"
+            )
+            await wait_msg.delete()
+        else:
+            await wait_msg.edit_text(f"⚠️ Ошибка выполнения рецепта:\n<code>{html.escape(log)}</code>", parse_mode="HTML")
+        return
+
+    briefing = format_recipe_for_telegram(parts[0])
+    await message.answer(briefing, parse_mode="HTML")
+
+@router.message(Command("recon", "dossier"))
+async def cmd_recon(message: types.Message):
+    args = message.text.replace("/recon", "").replace("/dossier", "").strip()
+    if not args:
+        await message.answer(
+            "🕵️‍♂️ <b>OSINT-разведка и сбор цифрового досье (/recon)</b>\n\n"
+            "Пример: <code>/recon @amalia_beauty</code>\n"
+            "Или: <code>/recon https://amaliapro.biz</code>\n\n"
+            "Что делает агент:\n"
+            "• Проверяет сетку аккаунтов (Username Pivoting по 8+ платформам: TG, VK, YT, Dzen, TikTok, VC)\n"
+            "• Обходит мультиссылку (Taplink) и лендинг\n"
+            "• Выявляет стек (Tilda, GetCourse, AmoCRM, пиксели, Метрику)\n"
+            "• Находит прямые PR-контакты и юрлица (ИП/ИНН)\n"
+            "• Автоматически передает контакты в базу аутрича",
+            parse_mode="HTML"
+        )
+        return
+
+    wait_msg = await message.answer(
+        f"🕵️‍♂️ <b>Провожу OSINT-разведку по {args}...</b>\n"
+        "• Проверка сетки аккаунтов (Username Pivoting)\n"
+        "• Анализ структуры лендинга и Taplink\n"
+        "• Детекция стека и юридических реквизитов...",
+        parse_mode="HTML"
+    )
+
+    try:
+        report, raw_data = await build_dossier(args)
+        await send_formatted_response(message, wait_msg, report)
+    except Exception as e:
+        await wait_msg.edit_text(f"⚠️ Ошибка при разведке: {html.escape(str(e))}", parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("golden:"))
+async def callback_golden(callback: types.CallbackQuery):
+    style = callback.data.split(":", 1)[1]
+    text = callback.message.text or callback.message.caption or ""
+    if text:
+        ok, msg = add_golden_example(style=style, content=text)
+        await callback.answer("⭐️ Добавлено в золотые эталоны!", show_alert=True)
+        await callback.message.reply(f"✅ {msg}")
+    else:
+        await callback.answer("Не удалось извлечь текст поста.", show_alert=True)
+
+@router.callback_query(F.data == "learn_hint")
+async def callback_learn_hint(callback: types.CallbackQuery):
+    await callback.answer(
+        "💡 Обучение бота:\n\n"
+        "1. Отредактируйте текст поста и отправьте его в Reply — бот сам выделит отличия и выучит ваш Tone of Voice!\n"
+        "2. Или напишите команду /learn [ваше правило].",
+        show_alert=True
+    )
+
+
 @router.message(F.text)
 async def handle_text(message: types.Message):
+    # Check if user replied to bot message with edited text (Diff learning)
+    if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.is_bot:
+        replied_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+        edited_text = (message.text or "").strip()
+        if len(replied_text) > 100 and len(edited_text) > 60 and not edited_text.startswith("/"):
+            wait_msg = await message.answer("🧠 <b>Вижу вашу редактуру! Сравниваю версии и извлекаю правила Tone of Voice...</b>", parse_mode="HTML")
+            report, rules = await analyze_diff_and_learn(replied_text, edited_text)
+            await wait_msg.edit_text(report, parse_mode="HTML")
+            return
     # Skip handled commands
     if any(message.text.startswith(c) for c in (
         "/setup_forum", "/start", "/help", "/status", "/karusel", 
-        "/insta", "/adapt", "/remake", "/post", "/index", "/spy", "/montage", "/browser", "/outreach"
+        "/insta", "/adapt", "/remake", "/post", "/index", "/spy", "/montage", "/browser", "/outreach", "/learn", "/rules", "/delrule", "/recipes", "/recipe", "/recon", "/dossier"
     )):
         return
 
