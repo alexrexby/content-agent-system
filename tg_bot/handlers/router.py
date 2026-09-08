@@ -15,6 +15,7 @@ from tg_bot.engine.carousel_builder import run_build_karusel, build_dynamic_caro
 from tg_bot.engine.formatter import markdown_to_telegram_html
 from tg_bot.engine.insta_monitor import is_instagram_url, extract_instagram_url, analyze_instagram_post
 from tg_bot.engine.prompts import STYLE_TITLES, resolve_style_name, get_lead_magnet_prompt, get_blueprint_prompt
+from tg_bot.engine.funnel_architect import build_full_funnel
 from tg_bot.engine.knowledge_base import index_materials_directory, search_knowledge
 from tg_bot.engine.insta_batch import analyze_competitor_profile
 from tg_bot.engine.video_pipeline import process_video_montage
@@ -116,6 +117,7 @@ HELP_TEXT = """
 • <code>/browser [URL]</code> — браузерный агент (скриншот страницы Playwright)
 • <code>/outreach [stats|add|send]</code> — PR-аутрич блогеров и запуск рассылки
 • <code>/recon [username/URL]</code> — OSINT-разведка в стиле SpiderFoot (досье, стек, контакты)
+• <code>/funnel [тема]</code> — сквозная автоворонка под ключ (Кадыров «Микроволновка» + Хормози $100M Leads)
 • <code>/magnet [тема]</code> — продающий лид-магнит + кодовое слово в бот (методология 2026)
 • <code>/blueprint [тема]</code> — архитектурный Blueprint / Miro-карта системы
 • <code>/recipes</code> — каталог проверенных рецептов решения задач (GetCourse, Tilda, VK)
@@ -803,6 +805,62 @@ async def callback_make_magnet(callback: types.CallbackQuery):
     prompt = get_lead_magnet_prompt(f"Лид-магнит к посту:\n{orig_text[:900]}")
     response, model_name = await run_agent_task(role="copywriter", user_prompt=prompt, style="provocation")
     await send_formatted_response(callback.message, wait_msg, response, model_name=model_name)
+
+@router.message(Command("funnel"))
+async def cmd_funnel(message: types.Message):
+    topic = message.text.replace("/funnel", "").strip()
+    if not topic:
+        await message.answer(
+            "🚀 <b>Сквозной Архитектор Автоворонок (/funnel)</b>\n\n"
+            "Методология: <b>Сабри Суби</b> (HVCO) + <b>Алекс Хормози</b> (The Gap) + <b>Тимур Кадыров</b> (бот «Микроволновка»).\n\n"
+            "Генерирует за 1 клик:\n"
+            "1. Трафик-пост с контринтуитивным хуком и кодовым словом\n"
+            "2. HVCO лид-магнит (инсайдерский аудит/чек-лист потерь)\n"
+            "3. 3 сообщения чат-бота «Микроволновка» с кнопками сегментации\n"
+            "4. Квалификационную анкету для фильтра нецелевых лидов\n"
+            "5. Готовый JSON/MD файл сценария для импорта в BotHelp / Salebot\n\n"
+            "Отправьте команду с темой или продуктом:\n"
+            "<code>/funnel Осенний рекорд и перезапись базы для салонов красоты</code>\n"
+            "<code>/funnel Наставничество по маркетингу с чеком 300к</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    wait_msg = await message.answer(
+        f"⏳ 🚀 <b>Архитектор воронок</b> проектирует сквозную систему продаж по методологии Кадырова и Хормози...\n\n"
+        f"Тема: <i>«{topic}»</i>\n"
+        f"• Создание контринтуитивного хука и кодового слова\n"
+        f"• Упаковка HVCO лид-магнита и блока The Gap\n"
+        f"• Сборка сценария бота «Микроволновка» (3 шага + кнопки)\n"
+        f"• Формирование анкеты и JSON-файла импорта...",
+        parse_mode="HTML"
+    )
+
+    try:
+        result = await build_full_funnel(topic)
+        summary_text = (
+            f"🚀 <b>Сквозная автоворонка успешно спроектирована!</b>\n\n"
+            f"📌 <b>Название:</b> {result['title']}\n"
+            f"🔑 <b>Кодовое слово входа:</b> <code>{result['keyword']}</code>\n"
+            f"📁 <b>Файлы сохранены в папку:</b> <code>data/funnels/</code>\n\n"
+            f"<i>Отправляю полное досье и JSON-сценарий чат-бота файлами ниже:</i>"
+        )
+        await wait_msg.edit_text(summary_text, parse_mode="HTML")
+
+        if result['md_path'].exists():
+            await message.answer_document(
+                document=FSInputFile(str(result['md_path'])),
+                caption=f"📄 <b>Полное досье воронки:</b> {result['title']}",
+                parse_mode="HTML"
+            )
+        if result['json_path'].exists():
+            await message.answer_document(
+                document=FSInputFile(str(result['json_path'])),
+                caption="🤖 <b>JSON-сценарий чат-бота для BotHelp / Salebot</b>",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        await wait_msg.edit_text(f"⚠️ Ошибка при проектировании воронки: {e}")
 
 @router.callback_query(F.data.startswith("golden:"))
 async def callback_golden(callback: types.CallbackQuery):
