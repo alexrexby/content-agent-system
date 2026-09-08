@@ -14,7 +14,7 @@ from tg_bot.engine.file_extractor import extract_text_from_file
 from tg_bot.engine.carousel_builder import run_build_karusel, build_dynamic_carousel, remake_competitor_carousel, AVAILABLE_DECKS
 from tg_bot.engine.formatter import markdown_to_telegram_html
 from tg_bot.engine.insta_monitor import is_instagram_url, extract_instagram_url, analyze_instagram_post
-from tg_bot.engine.prompts import STYLE_TITLES, resolve_style_name
+from tg_bot.engine.prompts import STYLE_TITLES, resolve_style_name, get_lead_magnet_prompt, get_blueprint_prompt
 from tg_bot.engine.knowledge_base import index_materials_directory, search_knowledge
 from tg_bot.engine.insta_batch import analyze_competitor_profile
 from tg_bot.engine.video_pipeline import process_video_montage
@@ -42,8 +42,9 @@ def get_post_feedback_keyboard(style: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
+                InlineKeyboardButton(text="🧲 Лид-магнит", callback_data=f"magnet:{style}"),
                 InlineKeyboardButton(text="⭐️ В эталоны", callback_data=f"golden:{style}"),
-                InlineKeyboardButton(text="💡 Как обучать?", callback_data="learn_hint")
+                InlineKeyboardButton(text="💡 Обучение", callback_data="learn_hint")
             ]
         ]
     )
@@ -115,6 +116,8 @@ HELP_TEXT = """
 • <code>/browser [URL]</code> — браузерный агент (скриншот страницы Playwright)
 • <code>/outreach [stats|add|send]</code> — PR-аутрич блогеров и запуск рассылки
 • <code>/recon [username/URL]</code> — OSINT-разведка в стиле SpiderFoot (досье, стек, контакты)
+• <code>/magnet [тема]</code> — продающий лид-магнит + кодовое слово в бот (методология 2026)
+• <code>/blueprint [тема]</code> — архитектурный Blueprint / Miro-карта системы
 • <code>/recipes</code> — каталог проверенных рецептов решения задач (GetCourse, Tilda, VK)
 • <code>/recipe [домен]</code> — регламент и капканы работы с платформой (/recipe run)
 • <code>/learn [правило]</code> — обучение бота персональным правилам Tone of Voice
@@ -740,6 +743,66 @@ async def cmd_recon(message: types.Message):
         await send_formatted_response(message, wait_msg, report)
     except Exception as e:
         await wait_msg.edit_text(f"⚠️ Ошибка при разведке: {html.escape(str(e))}", parse_mode="HTML")
+
+@router.message(Command("magnet"))
+async def cmd_magnet(message: types.Message):
+    topic = message.text.replace("/magnet", "").strip()
+    if not topic:
+        await message.answer(
+            "🧲 <b>Генератор продающих лид-магнитов (методология 2026)</b>\n\n"
+            "Принцип Наты Анарбаевой: <i>Лид-магнит — это инструмент продажи, а не подарок.</i>\n"
+            "Он вскрывает скрытую проблему и делает неизбежным обращение за основным продуктом.\n\n"
+            "Отправьте команду с темой:\n"
+            "<code>/magnet Осенний спад в салонах красоты</code>\n"
+            "<code>/magnet Контентная воронка для эксперта</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    wait_msg = await message.answer(
+        f"⏳ 🧲 <b>Копирайтер</b> проектирует продающий лид-магнит и кодовое слово для бота...\n\nТема: <i>«{topic}»</i>",
+        parse_mode="HTML"
+    )
+    prompt = get_lead_magnet_prompt(topic)
+    response, model_name = await run_agent_task(role="copywriter", user_prompt=prompt, style="provocation")
+    await send_formatted_response(message, wait_msg, response, model_name=model_name)
+
+@router.message(Command("blueprint"))
+async def cmd_blueprint(message: types.Message):
+    topic = message.text.replace("/blueprint", "").strip()
+    if not topic:
+        await message.answer(
+            "🏛 <b>Генератор системных Blueprint (Miro-карта / архитектура системы)</b>\n\n"
+            "Создает пошаговую инженерную блок-схему процесса в Markdown/ASCII со связками, фильтрами и конверсиями.\n\n"
+            "Отправьте команду с темой:\n"
+            "<code>/blueprint Контентная воронка на 300 заявок</code>\n"
+            "<code>/blueprint Перезапись клиентской базы перед спадом</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    wait_msg = await message.answer(
+        f"⏳ 🏛 <b>Смысловик</b> строит архитектурный Blueprint системы...\n\nТема: <i>«{topic}»</i>",
+        parse_mode="HTML"
+    )
+    prompt = get_blueprint_prompt(topic)
+    response, model_name = await run_agent_task(role="analyst", user_prompt=prompt)
+    await send_formatted_response(message, wait_msg, response, model_name=model_name)
+
+@router.callback_query(F.data.startswith("magnet:"))
+async def callback_make_magnet(callback: types.CallbackQuery):
+    await callback.answer("Проектирую лид-магнит к посту...")
+    orig_text = callback.message.text or callback.message.caption or ""
+    first_lines = [l.strip() for l in orig_text.strip().split("\n") if l.strip()][:2]
+    topic_summary = " ".join(first_lines)[:120] if first_lines else "Экспертный пост"
+    
+    wait_msg = await callback.message.reply(
+        f"⏳ 🧲 Создаю продающий лид-магнит и кодовое слово к этому посту...\n\nТема: <i>{topic_summary}</i>",
+        parse_mode="HTML"
+    )
+    prompt = get_lead_magnet_prompt(f"Лид-магнит к посту:\n{orig_text[:900]}")
+    response, model_name = await run_agent_task(role="copywriter", user_prompt=prompt, style="provocation")
+    await send_formatted_response(callback.message, wait_msg, response, model_name=model_name)
 
 @router.callback_query(F.data.startswith("golden:"))
 async def callback_golden(callback: types.CallbackQuery):
